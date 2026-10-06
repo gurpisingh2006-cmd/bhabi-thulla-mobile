@@ -1,0 +1,532 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Bhabi Thulla v2</title>
+  <script src="/socket.io/socket.io.js"></script>
+
+  <style>
+    * {
+      box-sizing: border-box;
+      touch-action: manipulation;
+      -webkit-tap-highlight-color: transparent;
+      user-select: none;
+    }
+
+    @keyframes thullaFlash {
+      0% { background-color: rgba(231, 76, 60, 0); }
+      50% { background-color: rgba(231, 76, 60, 0.85); }
+      100% { background-color: rgba(231, 76, 60, 0); }
+    }
+
+    @keyframes cardPop {
+      0% { transform: scale(0.6) translateY(-20px); opacity: 0; }
+      100% { transform: scale(1) translateY(0); opacity: 1; }
+    }
+
+    @keyframes glow {
+      0% { box-shadow: 0 0 5px #f1c40f; }
+      50% { box-shadow: 0 0 15px #f1c40f, 0 0 25px #e67e22; }
+      100% { box-shadow: 0 0 5px #f1c40f; }
+    }
+
+    @keyframes toastSlide {
+      0% { transform: translate(-50%, -50px); opacity: 0; }
+      100% { transform: translate(-50%, 0); opacity: 1; }
+    }
+
+    :root {
+      --bg-color: #0d3b1e;
+      --card-bg: #ffffff;
+      --accent-color: #f1c40f;
+    }
+
+    body {
+      margin: 0;
+      padding: 0;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+      background: radial-gradient(circle, #1a5e32 0%, #0a2914 100%);
+      color: white;
+      height: 100vh;
+      height: -webkit-fill-available;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+    }
+
+    html {
+      height: -webkit-fill-available;
+    }
+
+    #thullaOverlay {
+      position: fixed;
+      top: 0; left: 0; width: 100vw; height: 100vh;
+      pointer-events: none;
+      z-index: 999;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 50px;
+      font-weight: 900;
+      color: #ff3333;
+      text-shadow: 0 0 15px black, 0 0 30px red;
+      opacity: 0;
+      transition: opacity 0.3s;
+    }
+
+    #thullaOverlay.active {
+      animation: thullaFlash 1s ease-in-out;
+      opacity: 1;
+    }
+
+    #gameNotice {
+      position: fixed;
+      top: 15px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: #e74c3c;
+      color: white;
+      padding: 10px 20px;
+      border-radius: 25px;
+      font-weight: bold;
+      font-size: 14px;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+      z-index: 1000;
+      display: none;
+      width: 85%;
+      max-width: 380px;
+      text-align: center;
+      animation: toastSlide 0.3s ease-out;
+    }
+
+    #lobby, #game {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      height: 100%;
+      width: 100%;
+    }
+
+    .card-panel {
+      background: rgba(0, 0, 0, 0.7);
+      padding: 24px;
+      border-radius: 16px;
+      text-align: center;
+      box-shadow: 0 8px 24px rgba(0,0,0,0.6);
+      width: 90%;
+      max-width: 360px;
+      backdrop-filter: blur(8px);
+      border: 1px solid rgba(255,255,255,0.1);
+    }
+
+    input, button {
+      padding: 12px;
+      margin: 6px 0;
+      border-radius: 8px;
+      border: none;
+      font-size: 16px;
+      width: 100%;
+    }
+
+    input { background: rgba(255,255,255,0.95); color: #222; text-align: center; }
+    button { background-color: var(--accent-color); color: #000; font-weight: bold; cursor: pointer; }
+    button:active { transform: scale(0.98); }
+
+    #table {
+      flex: 1;
+      width: 100%;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      align-items: center;
+      padding: 10px 5px;
+    }
+
+    .players-list {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: center;
+      gap: 6px;
+      width: 100%;
+      max-height: 25vh;
+      overflow-y: auto;
+    }
+
+    .player-badge {
+      background: rgba(0,0,0,0.5);
+      padding: 5px 10px;
+      border-radius: 15px;
+      font-size: 12px;
+      border: 2px solid transparent;
+      display: flex;
+      align-items: center;
+      gap: 4px;
+    }
+
+    .player-badge.active-turn {
+      border-color: #f1c40f;
+      animation: glow 1.5s infinite;
+      background: rgba(241, 196, 15, 0.25);
+    }
+
+    .player-badge.safe { border-color: #2ecc71; color: #2ecc71; }
+    .player-badge.offline { opacity: 0.5; }
+
+    .trick-area {
+      display: flex;
+      gap: 8px;
+      min-height: 110px;
+      align-items: center;
+      border: 2px dashed rgba(255,255,255,0.2);
+      padding: 10px;
+      border-radius: 12px;
+      width: 95%;
+      max-width: 500px;
+      justify-content: center;
+      background: rgba(0,0,0,0.25);
+      overflow-x: auto;
+    }
+
+    .hand-container {
+      width: 100%;
+      text-align: center;
+      padding-bottom: 5px;
+    }
+
+    .hand {
+      display: flex;
+      gap: 4px;
+      overflow-x: auto;
+      width: 100vw;
+      padding: 10px 15px 15px 15px;
+      scroll-behavior: smooth;
+      -webkit-overflow-scrolling: touch;
+    }
+
+    .card {
+      min-width: 55px;
+      height: 82px;
+      background: var(--card-bg);
+      color: #222;
+      border-radius: 6px;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      padding: 4px;
+      font-weight: bold;
+      font-size: 13px;
+      cursor: pointer;
+      box-shadow: 0 4px 8px rgba(0,0,0,0.4);
+      animation: cardPop 0.25s ease-out;
+      flex-shrink: 0;
+    }
+
+    .card:active {
+      transform: translateY(-8px) scale(1.05);
+    }
+
+    .card.red { color: #e74c3c; }
+
+    .status-bar {
+      font-size: 15px;
+      font-weight: bold;
+      background: rgba(0,0,0,0.6);
+      padding: 8px 16px;
+      border-radius: 20px;
+      border: 1px solid rgba(255,255,255,0.15);
+      margin-top: 5px;
+      text-align: center;
+    }
+
+    #leaderboardModal {
+      position: fixed;
+      top: 0; left: 0; width: 100vw; height: 100vh;
+      background: rgba(0,0,0,0.88);
+      backdrop-filter: blur(8px);
+      z-index: 1000;
+      display: none;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .leaderboard-card {
+      background: #111;
+      border: 2px solid var(--accent-color);
+      border-radius: 16px;
+      padding: 20px;
+      width: 88%;
+      max-width: 380px;
+      text-align: center;
+    }
+
+    .leaderboard-list {
+      list-style: none;
+      padding: 0;
+      margin: 15px 0;
+      text-align: left;
+    }
+
+    .leaderboard-item {
+      background: rgba(255,255,255,0.08);
+      margin: 6px 0;
+      padding: 10px;
+      border-radius: 8px;
+      display: flex;
+      justify-content: space-between;
+      font-size: 15px;
+    }
+
+    .leaderboard-item.loser {
+      background: rgba(231, 76, 60, 0.3);
+      border: 1px solid #e74c3c;
+      color: #ff6b6b;
+    }
+  </style>
+</head>
+<body>
+
+  <div id="thullaOverlay">💥 THULLA! 💥</div>
+  <div id="gameNotice"></div>
+
+  <div id="leaderboardModal">
+    <div class="leaderboard-card">
+      <h2 style="color: var(--accent-color); margin-top:0;">🏆 Classifica Finale</h2>
+      <ul class="leaderboard-list" id="leaderboardContent"></ul>
+      <button onclick="location.reload()">🔄 Nuova Partita</button>
+    </div>
+  </div>
+
+  <div id="lobby">
+    <div class="card-panel">
+      <h2 style="margin-top:0; color:var(--accent-color);">🎴 Bhabi Thulla v2</h2>
+      <p style="color:#aaa; font-size:13px; margin-bottom:15px;">Multiplayer Mobile Ready</p>
+      <input type="text" id="playerName" placeholder="Tuo Nome" maxlength="12">
+      <input type="text" id="roomCode" placeholder="Codice Stanza" value="ROOM1" maxlength="8">
+      <button onclick="joinRoom()">Entra in Stanza</button>
+      
+      <div id="roomControls" style="display:none; margin-top:15px;">
+        <p style="margin:5px 0; font-size:14px;">Giocatori: <span id="playerCount">0</span>/5</p>
+        <button onclick="addBot()" style="background:#3498db; color:white;">🤖 Aggiungi Bot</button>
+        <button onclick="startGame()" style="background:#2ecc71; color:white;">▶ Avvia Partita</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="game" style="display:none;">
+    <div class="status-bar" id="statusMsg">Caricamento...</div>
+    
+    <div id="table">
+      <div class="players-list" id="playersList"></div>
+
+      <div style="text-align: center; width: 100%;">
+        <span style="font-size:12px; color:#ccc;">Presa Attuale:</span>
+        <div class="trick-area" id="trickArea"></div>
+      </div>
+
+      <div class="hand-container">
+        <span style="font-size:12px; color:#ccc;">La Tua Mano:</span>
+        <div class="hand" id="myHand"></div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const socket = io({ reconnection: true, reconnectionAttempts: 10, reconnectionDelay: 1000 });
+    let myId = null;
+    let noticeTimeout = null;
+
+    let sessionToken = sessionStorage.getItem('bhabi_session_token');
+    if (!sessionToken) {
+      sessionToken = 'user_' + Date.now() + '_' + Math.random().toString(36).substr(2, 6);
+      sessionStorage.setItem('bhabi_session_token', sessionToken);
+    }
+
+    const savedName = localStorage.getItem('bhabi_player_name');
+    if (savedName) document.getElementById('playerName').value = savedName;
+
+    const AudioContext = window.AudioContext || window.webkitAudioContext;
+    let audioCtx = null;
+
+    function initAudio() {
+      if (!audioCtx) audioCtx = new AudioContext();
+      if (audioCtx.state === 'suspended') audioCtx.resume();
+    }
+
+    function playSound(type) {
+      if (!audioCtx) return;
+      try {
+        const osc = audioCtx.createOscillator();
+        const gain = audioCtx.createGain();
+        osc.connect(gain);
+        gain.connect(audioCtx.destination);
+
+        if (type === 'play') {
+          osc.type = 'sine';
+          osc.frequency.setValueAtTime(400, audioCtx.currentTime);
+          osc.frequency.exponentialRampToValueAtTime(800, audioCtx.currentTime + 0.08);
+          gain.gain.setValueAtTime(0.2, audioCtx.currentTime);
+          gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.08);
+          osc.start();
+          osc.stop(audioCtx.currentTime + 0.08);
+        } else if (type === 'thulla') {
+          osc.type = 'sawtooth';
+          osc.frequency.setValueAtTime(150, audioCtx.currentTime);
+          osc.frequency.linearRampToValueAtTime(60, audioCtx.currentTime + 0.3);
+          gain.gain.setValueAtTime(0.5, audioCtx.currentTime);
+          gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.3);
+          osc.start();
+          osc.stop(audioCtx.currentTime + 0.3);
+        } else if (type === 'win') {
+          osc.type = 'triangle';
+          osc.frequency.setValueAtTime(523.25, audioCtx.currentTime);
+          osc.frequency.setValueAtTime(659.25, audioCtx.currentTime + 0.12);
+          gain.gain.setValueAtTime(0.3, audioCtx.currentTime);
+          gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.3);
+          osc.start();
+          osc.stop(audioCtx.currentTime + 0.3);
+        }
+      } catch (e) {}
+    }
+
+    function showNotice(text) {
+      const el = document.getElementById('gameNotice');
+      el.innerText = text;
+      el.style.display = 'block';
+      if (noticeTimeout) clearTimeout(noticeTimeout);
+      noticeTimeout = setTimeout(() => { el.style.display = 'none'; }, 3000);
+    }
+
+    socket.on('connect', () => { 
+      myId = socket.id;
+      const lastRoom = sessionStorage.getItem('bhabi_room_code');
+      if (lastRoom) {
+        socket.emit('joinRoom', { roomCode: lastRoom, playerName: savedName, sessionToken });
+      }
+    });
+
+    function joinRoom() {
+      initAudio();
+      const name = document.getElementById('playerName').value || 'Giocatore';
+      const room = document.getElementById('roomCode').value || 'ROOM1';
+      
+      localStorage.setItem('bhabi_player_name', name);
+      sessionStorage.setItem('bhabi_room_code', room);
+
+      socket.emit('joinRoom', { roomCode: room, playerName: name, sessionToken });
+      document.getElementById('roomControls').style.display = 'block';
+    }
+
+    function addBot() { socket.emit('addBot'); }
+    function startGame() { socket.emit('startGame'); }
+
+    socket.on('roomState', (room) => {
+      document.getElementById('playerCount').innerText = room.players.length;
+    });
+
+    socket.on('gameState', ({ room, event }) => {
+      document.getElementById('lobby').style.display = 'none';
+      document.getElementById('game').style.display = 'flex';
+
+      if (event === 'thulla') triggerThullaEffect();
+      else if (event === 'play') playSound('play');
+      else if (event === 'trick_win') playSound('win');
+
+      const me = room.players.find(p => p.token === sessionToken);
+      const activePlayer = room.players[room.turnIndex];
+      const isMyTurn = me && activePlayer && activePlayer.token === me.token && !room.isResolving;
+
+      document.getElementById('statusMsg').innerText = room.isResolving
+        ? "⏳ Controllo presa..."
+        : (isMyTurn ? "👉 È IL TUO TURNO!" : `Turno di: ${activePlayer ? activePlayer.name : ''}`);
+
+      const playersListEl = document.getElementById('playersList');
+      playersListEl.innerHTML = '';
+      room.players.forEach((p, idx) => {
+        const badge = document.createElement('div');
+        let badgeClass = 'player-badge';
+        if (idx === room.turnIndex) badgeClass += ' active-turn';
+        if (p.isSafe) badgeClass += ' safe';
+        if (!p.connected && !p.isBot) badgeClass += ' offline';
+        badge.className = badgeClass;
+        
+        const icon = p.isBot ? '🤖' : '👤';
+        const offlineTag = (!p.connected && !p.isBot) ? ' ⚠️' : '';
+        const safeTag = p.isSafe ? ' ✅' : '';
+        badge.innerHTML = `${icon} <strong>${p.name}</strong> (${p.cards.length})${safeTag}${offlineTag}`;
+        playersListEl.appendChild(badge);
+      });
+
+      const handEl = document.getElementById('myHand');
+      handEl.innerHTML = '';
+      if (me && me.cards) {
+        me.cards.forEach(card => {
+          const cardEl = createCardUI(card);
+          cardEl.onclick = () => {
+            initAudio();
+            if (isMyTurn) socket.emit('playCard', card.id);
+          };
+          handEl.appendChild(cardEl);
+        });
+      }
+
+      const trickEl = document.getElementById('trickArea');
+      trickEl.innerHTML = '';
+      room.currentTrick.forEach(item => {
+        const wrap = document.createElement('div');
+        wrap.style.textAlign = 'center';
+        wrap.appendChild(createCardUI(item.card));
+        const label = document.createElement('small');
+        label.style.display = 'block';
+        label.style.fontSize = '10px';
+        label.style.marginTop = '2px';
+        label.innerText = item.player.name;
+        wrap.appendChild(label);
+        trickEl.appendChild(wrap);
+      });
+    });
+
+    socket.on('gameOver', ({ loser, winners }) => {
+      sessionStorage.removeItem('bhabi_room_code');
+      const modal = document.getElementById('leaderboardModal');
+      const list = document.getElementById('leaderboardContent');
+      list.innerHTML = '';
+
+      winners.forEach((winnerName, index) => {
+        const item = document.createElement('li');
+        item.className = 'leaderboard-item';
+        let medal = index === 0 ? '🥇' : (index === 1 ? '🥈' : '🥉');
+        item.innerHTML = `<span>${medal} ${index + 1}° Posto</span> <strong>${winnerName}</strong>`;
+        list.appendChild(item);
+      });
+
+      const loserItem = document.createElement('li');
+      loserItem.className = 'leaderboard-item loser';
+      loserItem.innerHTML = `<span>🤡 BHABI</span> <strong>${loser}</strong>`;
+      list.appendChild(loserItem);
+
+      modal.style.display = 'flex';
+    });
+
+    socket.on('errorMsg', (msg) => showNotice(msg));
+
+    function createCardUI(card) {
+      const el = document.createElement('div');
+      const isRed = card.suit === 'H' || card.suit === 'D';
+      const suitIcons = { 'S': '♠', 'H': '♥', 'D': '♦', 'C': '♣' };
+      
+      el.className = `card ${isRed ? 'red' : ''}`;
+      el.innerHTML = `<div>${card.value}</div><div style="font-size:18px; text-align:center;">${suitIcons[card.suit]}</div><div style="text-align:right;">${card.value}</div>`;
+      return el;
+    }
+
+    function triggerThullaEffect() {
+      playSound('thulla');
+      const overlay = document.getElementById('thullaOverlay');
+      overlay.classList.add('active');
+      setTimeout(() => { overlay.classList.remove('active'); }, 1000);
+    }
+  </script>
+</body>
+</html>
