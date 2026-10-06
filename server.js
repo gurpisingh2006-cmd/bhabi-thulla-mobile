@@ -348,6 +348,15 @@ io.on('connection', (socket) => {
       if (player) {
         player.connected = false;
       }
+
+      // Controlla se ci sono ancora umani connessi nella stanza
+      const activeHumanPlayers = room.players.filter(p => !p.isBot && p.connected);
+
+      // Se non ci sono più giocatori umani connessi, elimina la stanza
+      if (activeHumanPlayers.length === 0) {
+        delete rooms[currentRoom];
+        console.log(`Stanza ${currentRoom} eliminata perché vuota o inattiva.`);
+      }
     }
   });
 });
