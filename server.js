@@ -210,6 +210,7 @@ io.on('connection', (socket) => {
 
     const card = player.cards[cardIdx];
 
+    // Controllo Asso di Picche obbligatorio se ce l'ha in mano all'inizio
     if (room.isFirstTurnEver && room.currentTrick.length === 0) {
       const hasAceOfSpades = player.cards.some(c => c.suit === 'S' && c.value === 'A');
       if (hasAceOfSpades && !(card.suit === 'S' && card.value === 'A')) {
@@ -221,6 +222,7 @@ io.on('connection', (socket) => {
     if (room.leadSuit && card.suit !== room.leadSuit) {
       const hasLeadSuit = player.cards.some(c => c.suit === room.leadSuit);
       if (hasLeadSuit) {
+        // Se non è più il primissimo turno, blocchiamo l'uscita fuori seme se ha il seme in mano
         if (!room.isFirstTurnEver) {
           const suitNames = { 'S': 'Picche ♠', 'H': 'Cuori ♥', 'D': 'Quadri ♦', 'C': 'Fiori ♣' };
           if (socket) socket.emit('errorMsg', `Devi rispondere con il seme della presa (${suitNames[room.leadSuit]})!`);
@@ -235,10 +237,12 @@ io.on('connection', (socket) => {
       room.leadSuit = card.suit;
     }
 
+    // Regola Thulla flessibile SOLO per il primissimo giro in assoluto
     let isThulla = false;
     if (room.leadSuit && card.suit !== room.leadSuit) {
       if (room.isFirstTurnEver) {
-        const hasLeadSuit = player.cards.some(c => c.suit === room.leadSuit);
+        const hasLeadSuit = player.cards.some(c => c.suit === room.leadSuit) || (card.suit === room.leadSuit);
+        // Se aveva il seme in mano e ha scelto di scartare altro, scatta il Thulla anche al primo turno
         isThulla = hasLeadSuit;
       } else {
         isThulla = true;
@@ -251,7 +255,7 @@ io.on('connection', (socket) => {
 
     if (isThulla) {
       room.isResolving = true;
-      room.isFirstTurnEver = false;
+      room.isFirstTurnEver = false; // Il primo turno speciale finisce qui con il Thulla
       io.to(room.code).emit('gameState', { room, event: 'play', playedBy: player.name });
 
       setTimeout(() => {
@@ -291,7 +295,8 @@ io.on('connection', (socket) => {
 
     } else if (room.currentTrick.length >= activePlayersCount) {
       room.isResolving = true;
-      room.isFirstTurnEver = false;
+      // Il primo turno speciale si conclude regolarmente solo quando tutti hanno giocato la loro carta in questo trick
+      room.isFirstTurnEver = false; 
       io.to(room.code).emit('gameState', { room, event: 'play', playedBy: player.name });
 
       setTimeout(() => {
@@ -330,7 +335,7 @@ io.on('connection', (socket) => {
 
     } else {
       advanceTurn(room);
-      room.isFirstTurnEver = false;
+      // NON disattiviamo isFirstTurnEver qui, perché il primo giro di mano non è ancora terminato!
       checkSafety(room);
       io.to(room.code).emit('gameState', { room, event: 'play', playedBy: player.name });
 
