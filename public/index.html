@@ -240,7 +240,20 @@
       text-align: center;
     }
 
-    #leaderboardModal {
+    #askCardsBtn {
+      background-color: #3498db;
+      color: white;
+      padding: 8px 16px;
+      border-radius: 15px;
+      font-size: 13px;
+      font-weight: bold;
+      border: none;
+      margin-top: 5px;
+      cursor: pointer;
+      display: none;
+    }
+
+    #selectPlayerModal, #leaderboardModal {
       position: fixed;
       top: 0; left: 0; width: 100vw; height: 100vh;
       background: rgba(0,0,0,0.88);
@@ -290,6 +303,16 @@
   <div id="thullaOverlay">💥 THULLA! 💥</div>
   <div id="gameNotice"></div>
 
+  <!-- Modale Scelta Giocatore da cui chiedere carte -->
+  <div id="selectPlayerModal">
+    <div class="leaderboard-card">
+      <h3 style="color: var(--accent-color); margin-top:0;">🤲 Chiedi Carta</h3>
+      <p style="font-size:13px; color:#aaa;">Seleziona un giocatore a cui chiedere una carta:</p>
+      <div id="playerSelectList" style="margin: 15px 0; display:flex; flex-direction:column; gap:8px;"></div>
+      <button onclick="closeSelectModal()" style="background:#e74c3c; color:white;">Annulla</button>
+    </div>
+  </div>
+
   <div id="leaderboardModal">
     <div class="leaderboard-card">
       <h2 style="color: var(--accent-color); margin-top:0;">🏆 Classifica Finale</h2>
@@ -326,7 +349,8 @@
       </div>
 
       <div class="hand-container">
-        <span style="font-size:12px; color:#ccc;">La Tua Mano:</span>
+        <button id="askCardsBtn" onclick="openSelectModal()">🤲 Chiedi Carte</button>
+        <span style="display:block; font-size:12px; color:#ccc; margin-top:3px;">La Tua Mano:</span>
         <div class="hand" id="myHand"></div>
       </div>
     </div>
@@ -336,6 +360,7 @@
     const socket = io({ reconnection: true, reconnectionAttempts: 10, reconnectionDelay: 1000 });
     let myId = null;
     let noticeTimeout = null;
+    let cachedRoomData = null;
 
     let sessionToken = sessionStorage.getItem('bhabi_session_token');
     if (!sessionToken) {
@@ -421,11 +446,51 @@
     function addBot() { socket.emit('addBot'); }
     function startGame() { socket.emit('startGame'); }
 
+    // Gestione Modale per Chiedere Carta
+    function openSelectModal() {
+      if (!cachedRoomData) return;
+      const me = cachedRoomData.players.find(p => p.token === sessionToken);
+      const listEl = document.getElementById('playerSelectList');
+      listEl.innerHTML = '';
+
+      const eligibleDonors = cachedRoomData.players.filter(p => p.token !== sessionToken && p.cards.length > 0 && !p.isSafe);
+
+      if (eligibleDonors.length === 0) {
+        listEl.innerHTML = '<p style="color:#e74c3c; font-size:14px;">Nessun giocatore ha carte disponibili da cedere.</p>';
+      } else {
+        eligibleDonors.forEach(donor => {
+          const btn = document.createElement('button');
+          btn.style.background = '#3498db';
+          btn.style.color = 'white';
+          btn.style.padding = '10px';
+          btn.innerHTML = `👤 <strong>${donor.name}</strong> (${donor.cards.length} carte)`;
+          btn.onclick = () => {
+            socket.emit('requestCardFrom', { targetPlayerId: donor.id });
+            closeSelectModal();
+          };
+          listEl.appendChild(btn);
+        });
+      }
+
+      document.getElementById('selectPlayerModal').style.display = 'flex';
+    }
+
+    function closeSelectModal() {
+      document.getElementById('selectPlayerModal').style.display = 'none';
+    }
+
+    // Ricezione richiesta da parte di un altro giocatore (conferma)
+    socket.on('cardRequestPrompt', ({ requesterId, requesterName }) => {
+      const confirmAccept = confirm(`🤲 ${requesterName} ti sta chiedendo una carta. Vuoi accettare e dargliela?`);
+      socket.emit('respondCardRequest', { requesterId, accepted: confirmAccept });
+    });
+
     socket.on('roomState', (room) => {
       document.getElementById('playerCount').innerText = room.players.length;
     });
 
     socket.on('gameState', ({ room, event }) => {
+      cachedRoomData = room;
       document.getElementById('lobby').style.display = 'none';
       document.getElementById('game').style.display = 'flex';
 
@@ -440,6 +505,14 @@
       document.getElementById('statusMsg').innerText = room.isResolving
         ? "⏳ Controllo presa..."
         : (isMyTurn ? "👉 È IL TUO TURNO!" : `Turno di: ${activePlayer ? activePlayer.name : ''}`);
+
+      // Mostra o nascondi il tasto "Chiedi Carte" sempre disponibile se non sei salvo
+      const askBtn = document.getElementById('askCardsBtn');
+      if (me && !me.isSafe) {
+        askBtn.style.display = 'inline-block';
+      } else {
+        askBtn.style.display = 'none';
+      }
 
       const playersListEl = document.getElementById('playersList');
       playersListEl.innerHTML = '';

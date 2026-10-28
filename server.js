@@ -5,7 +5,6 @@ const { Server } = require('socket.io');
 const app = express();
 const server = http.createServer(app);
 
-// Socket.io con Heartbeat/Ping ottimizzati per dispositivi mobili
 const io = new Server(server, {
   pingInterval: 10000,
   pingTimeout: 5000,
@@ -43,7 +42,6 @@ function sortCards(cards) {
 
 io.on('connection', (socket) => {
   let currentRoom = null;
-  let playerId = null;
 
   socket.on('joinRoom', ({ roomCode, playerName, sessionToken }) => {
     currentRoom = roomCode.toUpperCase();
@@ -64,16 +62,12 @@ io.on('connection', (socket) => {
     }
 
     const room = rooms[currentRoom];
-    
-    // Gestione Riconnessione
     let existingPlayer = room.players.find(p => p.token === sessionToken);
 
     if (existingPlayer) {
       existingPlayer.id = socket.id;
       existingPlayer.connected = true;
-      playerId = socket.id;
     } else if (!room.started && room.players.length < 5) {
-      playerId = socket.id;
       room.players.push({
         id: socket.id,
         token: sessionToken,
@@ -159,6 +153,58 @@ io.on('connection', (socket) => {
     executeMove(room, player, cardId, socket);
   });
 
+  // Gestione richiesta carta a un giocatore specifico
+  socket.on('requestCardFrom', ({ targetPlayerId }) => {
+    if (!currentRoom || !rooms[currentRoom]) return;
+    const room = rooms[currentRoom];
+    const requester = room.players.find(p => p.id === socket.id);
+    const target = room.players.find(p => p.id === targetPlayerId);
+
+    if (!requester || requester.isSafe) return;
+    if (!target || target.cards.length === 0 || target.isSafe) {
+      socket.emit('errorMsg', 'Questo giocatore non ha carte da dare o non è disponibile.');
+      return;
+    }
+
+    if (target.isBot) {
+      transferCard(room, target, requester);
+    } else {
+      io.to(target.id).emit('cardRequestPrompt', {
+        requesterId: requester.id,
+        requesterName: requester.name
+      });
+      socket.emit('errorMsg', `Richiesta inviata a ${target.name}. In attesa di conferma...`);
+    }
+  });
+
+  // Risposta del giocatore umano alla richiesta di carta
+  socket.on('respondCardRequest', ({ requesterId, accepted }) => {
+    if (!currentRoom || !rooms[currentRoom]) return;
+    const room = rooms[currentRoom];
+    const target = room.players.find(p => p.id === socket.id);
+    const requester = room.players.find(p => p.id === requesterId);
+
+    if (!target || !requester) return;
+
+    if (accepted && target.cards.length > 0) {
+      transferCard(room, target, requester);
+      io.to(target.id).emit('errorMsg', `Hai accettato di dare una carta a ${requester.name}.`);
+    } else {
+      io.to(requester.id).emit('errorMsg', `${target.name} ha rifiutato di darti una carta.`);
+    }
+  });
+
+  function transferCard(room, donor, receiver) {
+    const givenCard = donor.cards.pop();
+    receiver.cards.push(givenCard);
+    sortCards(receiver.cards);
+    sortCards(donor.cards);
+
+    checkSafety(room);
+    io.to(room.code).emit('gameState', { room, event: 'play', playedBy: receiver.name });
+    io.to(room.code).emit('errorMsg', `🤝 ${donor.name} ha dato una carta a ${receiver.name}!`);
+  }
+
   function executeMove(room, player, cardId, socket = null) {
     const cardIdx = player.cards.findIndex(c => c.id === cardId);
     if (cardIdx === -1) return;
@@ -166,9 +212,13 @@ io.on('connection', (socket) => {
     const card = player.cards[cardIdx];
 
     if (room.isFirstTurnEver && room.currentTrick.length === 0) {
-      if (!(card.suit === 'S' && card.value === 'A')) {
-        if (socket) socket.emit('errorMsg', 'Devi giocare l\'Asso di Picche (A♠) come prima carta!');
+      const hasAceOfSpades = player.cards.some(c => c.suit === 'S' && c.value === 'A');
+      if (hasAceOfSpades && !(card.suit === 'S' && card.value === 'A')) {
+        if (socket) socket.emit('errorMsg', 'Hai l\'Asso di Picche (A♠) in mano, devi giocarlo per forza!');
         return;
+      }
+      if (!hasAceOfSpades && room.isFirstTurnEver) {
+        room.isFirstTurnEver = false;
       }
     }
 
@@ -190,7 +240,7 @@ io.on('connection', (socket) => {
     const isThulla = room.leadSuit && card.suit !== room.leadSuit;
     room.currentTrick.push({ player, card });
 
-    const activePlayers = getActivePlayers(room);
+    const activePlayersCount = room.players.filter(p => !p.isSafe).length;
 
     if (isThulla) {
       room.isResolving = true;
@@ -232,14 +282,14 @@ io.on('connection', (socket) => {
         if (!checkGameOver(room)) checkBotTurn(room);
       }, 1500);
 
-    } else if (room.currentTrick.length === activePlayers.length) {
+    } else if (room.currentTrick.length >= activePlayersCount) {
       room.isResolving = true;
       room.isFirstTurnEver = false;
       io.to(room.code).emit('gameState', { room, event: 'play', playedBy: player.name });
 
       setTimeout(() => {
-        let highestCard = null;
         let winnerIdx = -1;
+        let highestCard = null;
 
         room.currentTrick.forEach(item => {
           if (item.card.suit === room.leadSuit) {
@@ -255,10 +305,14 @@ io.on('connection', (socket) => {
 
         checkSafety(room);
 
-        if (room.players[winnerIdx].isSafe) {
-          advanceTurnFrom(room, winnerIdx);
+        if (winnerIdx !== -1 && room.players[winnerIdx]) {
+          if (room.players[winnerIdx].isSafe) {
+            advanceTurnFrom(room, winnerIdx);
+          } else {
+            room.turnIndex = winnerIdx;
+          }
         } else {
-          room.turnIndex = winnerIdx;
+          advanceTurn(room);
         }
 
         room.isResolving = false;
@@ -288,10 +342,6 @@ io.on('connection', (socket) => {
     room.turnIndex = nextIdx;
   }
 
-  function getActivePlayers(room) {
-    return room.players.filter(p => !p.isSafe);
-  }
-
   function checkSafety(room) {
     room.players.forEach(p => {
       if (!p.isSafe && p.cards.length === 0) {
@@ -302,9 +352,9 @@ io.on('connection', (socket) => {
   }
 
   function checkGameOver(room) {
-    const active = getActivePlayers(room);
-    if (active.length === 1) {
-      const loser = active[0].name;
+    const active = room.players.filter(p => !p.isSafe);
+    if (active.length <= 1) {
+      const loser = active.length === 1 ? active[0].name : (room.winnersList[room.winnersList.length - 1] || 'Sconosciuto');
       io.to(room.code).emit('gameOver', { 
         loser: loser,
         winners: room.winnersList
@@ -349,13 +399,9 @@ io.on('connection', (socket) => {
         player.connected = false;
       }
 
-      // Controlla se ci sono ancora umani connessi nella stanza
       const activeHumanPlayers = room.players.filter(p => !p.isBot && p.connected);
-
-      // Se non ci sono più giocatori umani connessi, elimina la stanza
       if (activeHumanPlayers.length === 0) {
         delete rooms[currentRoom];
-        console.log(`Stanza ${currentRoom} eliminata perché vuota o inattiva.`);
       }
     }
   });
