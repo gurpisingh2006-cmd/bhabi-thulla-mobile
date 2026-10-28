@@ -308,31 +308,28 @@ io.on('connection', (socket) => {
         });
 
         // -------------------------------------------------------------------------
-        // CONTROLLO 1vs1: Se siamo in duello finale (2 attivi) e uno esaurisce le carte
+        // CONTROLLO PENALITÀ ULTIMA CARTA PESANTE
+        // Se un giocatore rimane con 0 carte dopo questa mossa, verifichiamo se la sua 
+        // carta giocata era più pesante della carta vincente del leadSuit.
+        // Se è più pesante, NON può chiudere: riceve le carte del trick come penalità!
         // -------------------------------------------------------------------------
-        const activePlayers = room.players.filter(p => !p.isSafe);
-        if (activePlayers.length === 1) { // Uno ha appena finito le carte in questo trick
-          // Troviamo chi ha finito le carte (potrebbe essere il giocatore appena mosso o l'altro)
-          room.currentTrick.forEach(item => {
-            if (item.player.cards.length === 0) {
-              // Verifichiamo se la carta giocata da questo giocatore era la più pesante del trick (o dello stesso seme guida)
-              // Se la sua carta ha un rank maggiore della carta vincente/guida dell'avversario:
-              if (item.card.suit === room.leadSuit && item.card.rank > highestCard.rank) {
-                // PENALITÀ: Non può chiudere! Gli raddoppiamo/diamo una carta di penalità ripescandola dal trick o dalle carte in tavola
-                const penaltyCards = room.currentTrick.map(t => t.card);
-                item.player.cards.push(...penaltyCards);
-                sortCards(item.player.cards);
-                
-                // Notifica a tutti
-                io.to(room.code).emit('errorMsg', `⚠️ ${item.player.name} ha esaurito le carte ma la sua carta era troppo pesante! Riceve le carte di penalità e continua.`);
-              }
+        room.currentTrick.forEach(item => {
+          if (item.player.cards.length === 0 && !item.player.isSafe) {
+            // Controlliamo se la sua carta appartiene al seme guida ed è più alta di quella del vincitore
+            if (item.card.suit === room.leadSuit && item.card.rank > highestCard.rank) {
+              const penaltyCards = room.currentTrick.map(t => t.card);
+              item.player.cards.push(...penaltyCards);
+              sortCards(item.player.cards);
+              
+              io.to(room.code).emit('errorMsg', `⚠️ ${item.player.name} ha esaurito le carte ma la sua carta era più pesante! Prende penalità e continua.`);
             }
-          });
-        }
+          }
+        });
 
         room.currentTrick = [];
         room.leadSuit = null;
 
+        // Ora possiamo controllare in sicurezza chi è davvero salvo
         checkSafety(room);
 
         if (winnerIdx !== -1 && room.players[winnerIdx]) {
