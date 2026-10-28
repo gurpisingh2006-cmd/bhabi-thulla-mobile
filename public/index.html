@@ -1,5 +1,3 @@
-index.html
-
 <!DOCTYPE html>
 <html lang="it">
 <head>
@@ -454,7 +452,7 @@ index.html
       const listEl = document.getElementById('playerSelectList');
       listEl.innerHTML = '';
 
-      const eligibleDonors = cachedRoomData.players.filter(p => p.token !== sessionToken && (p.cardCount ?? p.cards.length) > 0 && !p.isSafe);
+      const eligibleDonors = cachedRoomData.players.filter(p => p.token !== sessionToken && p.cards.length > 0 && !p.isSafe);
 
       if (eligibleDonors.length === 0) {
         listEl.innerHTML = '<p style="color:#e74c3c; font-size:14px;">Nessun giocatore ha carte disponibili da cedere.</p>';
@@ -464,10 +462,7 @@ index.html
           btn.style.background = '#3498db';
           btn.style.color = 'white';
           btn.style.padding = '10px';
-          const nameEl = document.createElement('strong');
-          nameEl.textContent = donor.name;
-          btn.append('👤 ', nameEl, ` (${donor.cardCount ?? donor.cards.length} carte)`);
-
+          btn.innerHTML = `👤 <strong>${donor.name}</strong> (${donor.cards.length} carte)`;
           btn.onclick = () => {
             socket.emit('requestCardFrom', { targetPlayerId: donor.id });
             closeSelectModal();
@@ -529,10 +524,7 @@ index.html
         const icon = p.isBot ? '🤖' : '👤';
         const offlineTag = (!p.connected && !p.isBot) ? ' ⚠️' : '';
         const safeTag = p.isSafe ? ' ✅' : '';
-        const nameEl = document.createElement('strong');
-        nameEl.textContent = p.name;
-        badge.append(document.createTextNode(`${icon} `), nameEl,
-          document.createTextNode(` (${p.cardCount ?? p.cards.length})${safeTag}${offlineTag}`));
+        badge.innerHTML = `${icon} <strong>${p.name}</strong> (${p.cards.length})${safeTag}${offlineTag}`;
         playersListEl.appendChild(badge);
       });
 
@@ -575,21 +567,13 @@ index.html
         const item = document.createElement('li');
         item.className = 'leaderboard-item';
         let medal = index === 0 ? '🥇' : (index === 1 ? '🥈' : '🥉');
-        const place = document.createElement('span');
-        place.textContent = `${medal} ${index + 1}° Posto`;
-        const name = document.createElement('strong');
-        name.textContent = winnerName;
-        item.append(place, name);
+        item.innerHTML = `<span>${medal} ${index + 1}° Posto</span> <strong>${winnerName}</strong>`;
         list.appendChild(item);
       });
 
       const loserItem = document.createElement('li');
       loserItem.className = 'leaderboard-item loser';
-      const loserLabel = document.createElement('span');
-      loserLabel.textContent = '🤡 BHABI';
-      const loserName = document.createElement('strong');
-      loserName.textContent = loser;
-      loserItem.append(loserLabel, loserName);
+      loserItem.innerHTML = `<span>🤡 BHABI</span> <strong>${loser}</strong>`;
       list.appendChild(loserItem);
 
       modal.style.display = 'flex';
@@ -615,4 +599,4 @@ index.html
     }
   </script>
 </body>
-</html>
+</html> 
