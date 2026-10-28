@@ -210,7 +210,6 @@ io.on('connection', (socket) => {
 
     const card = player.cards[cardIdx];
 
-    // Controllo Asso di Picche obbligatorio se ce l'ha in mano all'inizio
     if (room.isFirstTurnEver && room.currentTrick.length === 0) {
       const hasAceOfSpades = player.cards.some(c => c.suit === 'S' && c.value === 'A');
       if (hasAceOfSpades && !(card.suit === 'S' && card.value === 'A')) {
@@ -222,7 +221,6 @@ io.on('connection', (socket) => {
     if (room.leadSuit && card.suit !== room.leadSuit) {
       const hasLeadSuit = player.cards.some(c => c.suit === room.leadSuit);
       if (hasLeadSuit) {
-        // Se non è più il primissimo turno, blocchiamo l'uscita fuori seme se ha il seme in mano
         if (!room.isFirstTurnEver) {
           const suitNames = { 'S': 'Picche ♠', 'H': 'Cuori ♥', 'D': 'Quadri ♦', 'C': 'Fiori ♣' };
           if (socket) socket.emit('errorMsg', `Devi rispondere con il seme della presa (${suitNames[room.leadSuit]})!`);
@@ -237,12 +235,10 @@ io.on('connection', (socket) => {
       room.leadSuit = card.suit;
     }
 
-    // Regola Thulla flessibile SOLO per il primissimo giro in assoluto
     let isThulla = false;
     if (room.leadSuit && card.suit !== room.leadSuit) {
       if (room.isFirstTurnEver) {
         const hasLeadSuit = player.cards.some(c => c.suit === room.leadSuit) || (card.suit === room.leadSuit);
-        // Se aveva il seme in mano e ha scelto di scartare altro, scatta il Thulla anche al primo turno
         isThulla = hasLeadSuit;
       } else {
         isThulla = true;
@@ -255,7 +251,7 @@ io.on('connection', (socket) => {
 
     if (isThulla) {
       room.isResolving = true;
-      room.isFirstTurnEver = false; // Il primo turno speciale finisce qui con il Thulla
+      room.isFirstTurnEver = false;
       io.to(room.code).emit('gameState', { room, event: 'play', playedBy: player.name });
 
       setTimeout(() => {
@@ -295,8 +291,7 @@ io.on('connection', (socket) => {
 
     } else if (room.currentTrick.length >= activePlayersCount) {
       room.isResolving = true;
-      // Il primo turno speciale si conclude regolarmente solo quando tutti hanno giocato la loro carta in questo trick
-      room.isFirstTurnEver = false; 
+      room.isFirstTurnEver = false;
       io.to(room.code).emit('gameState', { room, event: 'play', playedBy: player.name });
 
       setTimeout(() => {
@@ -311,6 +306,29 @@ io.on('connection', (socket) => {
             }
           }
         });
+
+        // -------------------------------------------------------------------------
+        // CONTROLLO 1vs1: Se siamo in duello finale (2 attivi) e uno esaurisce le carte
+        // -------------------------------------------------------------------------
+        const activePlayers = room.players.filter(p => !p.isSafe);
+        if (activePlayers.length === 1) { // Uno ha appena finito le carte in questo trick
+          // Troviamo chi ha finito le carte (potrebbe essere il giocatore appena mosso o l'altro)
+          room.currentTrick.forEach(item => {
+            if (item.player.cards.length === 0) {
+              // Verifichiamo se la carta giocata da questo giocatore era la più pesante del trick (o dello stesso seme guida)
+              // Se la sua carta ha un rank maggiore della carta vincente/guida dell'avversario:
+              if (item.card.suit === room.leadSuit && item.card.rank > highestCard.rank) {
+                // PENALITÀ: Non può chiudere! Gli raddoppiamo/diamo una carta di penalità ripescandola dal trick o dalle carte in tavola
+                const penaltyCards = room.currentTrick.map(t => t.card);
+                item.player.cards.push(...penaltyCards);
+                sortCards(item.player.cards);
+                
+                // Notifica a tutti
+                io.to(room.code).emit('errorMsg', `⚠️ ${item.player.name} ha esaurito le carte ma la sua carta era troppo pesante! Riceve le carte di penalità e continua.`);
+              }
+            }
+          });
+        }
 
         room.currentTrick = [];
         room.leadSuit = null;
@@ -335,7 +353,6 @@ io.on('connection', (socket) => {
 
     } else {
       advanceTurn(room);
-      // NON disattiviamo isFirstTurnEver qui, perché il primo giro di mano non è ancora terminato!
       checkSafety(room);
       io.to(room.code).emit('gameState', { room, event: 'play', playedBy: player.name });
 
