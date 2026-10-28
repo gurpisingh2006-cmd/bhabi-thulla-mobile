@@ -15,9 +15,9 @@
     }
 
     @keyframes thullaFlash {
-      0% { background-color: rgba(231, 76, 60, 0); }
-      50% { background-color: rgba(231, 76, 60, 0.85); }
-      100% { background-color: rgba(231, 76, 60, 0); }
+      0% { background-color: rgba(231, 76, 60, 0); transform: scale(0.8); }
+      50% { background-color: rgba(231, 76, 60, 0.85); transform: scale(1.1); }
+      100% { background-color: rgba(231, 76, 60, 0); transform: scale(1); }
     }
 
     @keyframes cardPop {
@@ -446,7 +446,6 @@
     function addBot() { socket.emit('addBot'); }
     function startGame() { socket.emit('startGame'); }
 
-    // Gestione Modale per Chiedere Carta
     function openSelectModal() {
       if (!cachedRoomData) return;
       const me = cachedRoomData.players.find(p => p.token === sessionToken);
@@ -479,7 +478,6 @@
       document.getElementById('selectPlayerModal').style.display = 'none';
     }
 
-    // Ricezione richiesta da parte di un altro giocatore (conferma)
     socket.on('cardRequestPrompt', ({ requesterId, requesterName }) => {
       const confirmAccept = confirm(`🤲 ${requesterName} ti sta chiedendo una carta. Vuoi accettare e dargliela?`);
       socket.emit('respondCardRequest', { requesterId, accepted: confirmAccept });
@@ -506,7 +504,6 @@
         ? "⏳ Controllo presa..."
         : (isMyTurn ? "👉 È IL TUO TURNO!" : `Turno di: ${activePlayer ? activePlayer.name : ''}`);
 
-      // Mostra o nascondi il tasto "Chiedi Carte" sempre disponibile se non sei salvo
       const askBtn = document.getElementById('askCardsBtn');
       if (me && !me.isSafe) {
         askBtn.style.display = 'inline-block';

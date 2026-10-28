@@ -153,7 +153,6 @@ io.on('connection', (socket) => {
     executeMove(room, player, cardId, socket);
   });
 
-  // Richiesta carte a un giocatore specifico
   socket.on('requestCardFrom', ({ targetPlayerId }) => {
     if (!currentRoom || !rooms[currentRoom]) return;
     const room = rooms[currentRoom];
@@ -217,17 +216,18 @@ io.on('connection', (socket) => {
         if (socket) socket.emit('errorMsg', 'Hai l\'Asso di Picche (A♠) in mano, devi giocarlo per forza!');
         return;
       }
-      if (!hasAceOfSpades && room.isFirstTurnEver) {
-        room.isFirstTurnEver = false;
-      }
     }
 
     if (room.leadSuit && card.suit !== room.leadSuit) {
       const hasLeadSuit = player.cards.some(c => c.suit === room.leadSuit);
       if (hasLeadSuit) {
-        const suitNames = { 'S': 'Picche ♠', 'H': 'Cuori ♥', 'D': 'Quadri ♦', 'C': 'Fiori ♣' };
-        if (socket) socket.emit('errorMsg', `Devi rispondere con il seme della presa (${suitNames[room.leadSuit]})!`);
-        return;
+        // Dal secondo turno in poi, se hai il seme e non rispondi, viene bloccato.
+        // Al primo turno in assoluto permettiamo di scartare se non si ha il seme guida.
+        if (!room.isFirstTurnEver) {
+          const suitNames = { 'S': 'Picche ♠', 'H': 'Cuori ♥', 'D': 'Quadri ♦', 'C': 'Fiori ♣' };
+          if (socket) socket.emit('errorMsg', `Devi rispondere con il seme della presa (${suitNames[room.leadSuit]})!`);
+          return;
+        }
       }
     }
 
@@ -237,11 +237,20 @@ io.on('connection', (socket) => {
       room.leadSuit = card.suit;
     }
 
-    // Il Thulla scatta SOLO se il giocatore aveva il seme richiesto ma ha giocato un altro seme volontariamente.
-    // Se NON ha il seme richiesto, è un semplice scarto fuori seme e NON è Thulla.
-    const hasLeadSuitInHand = player.cards.some(c => c.suit === room.leadSuit) || card.suit === room.leadSuit;
-    const isThulla = room.leadSuit && card.suit !== room.leadSuit && hasLeadSuitInHand;
-    
+    // Regola Thulla: 
+    // - Se è il primissimo turno in assoluto e non hai il seme guida, NON è Thulla.
+    // - Dal secondo turno in poi, se non rispondi al seme guida, È THULLA!
+    let isThulla = false;
+    if (room.leadSuit && card.suit !== room.leadSuit) {
+      if (room.isFirstTurnEver) {
+        const hasLeadSuit = player.cards.some(c => c.suit === room.leadSuit);
+        // Se non aveva il seme in mano, nessun Thulla. Se ce l'aveva ed è uscito fuori seme, Thulla.
+        isThulla = hasLeadSuit;
+      } else {
+        isThulla = true;
+      }
+    }
+
     room.currentTrick.push({ player, card });
 
     const activePlayersCount = room.players.filter(p => !p.isSafe).length;
@@ -307,25 +316,7 @@ io.on('connection', (socket) => {
         room.currentTrick = [];
         room.leadSuit = null;
 
-        // Controllo 1vs1: se il giocatore esaurisce le carte ma la sua carta è troppo pesante rispetto all'avversario
-        const activePlayers = room.players.filter(p => !p.isSafe);
-        if (activePlayers.length === 1) { // Ora è rimasto 1 solo attivo (l'altro ha appena chiuso)
-          // Controlliamo chi ha appena chiuso e se la sua carta era più pesante della carta vincente del trick
-          // (ovvero non poteva chiudere con una carta superiore)
-        }
-
         checkSafety(room);
-
-        // Controllo specifico 1vs1 post-chiusura
-        room.players.forEach(p => {
-          if (p.cards.length === 0 && !p.isSafe) {
-            // Se ha finito le carte ma c'è un blocco 1vs1 pesante
-          }
-        });
-
-        // Gestione più pulita del controllo 1vs1 sulla carta finale pesante:
-        // Se un giocatore svuota le carte con una carta di rank superiore a quella dell'avversario in 1vs1:
-        // lo facciamo prima di segnarlo come safe.
 
         if (winnerIdx !== -1 && room.players[winnerIdx]) {
           if (room.players[winnerIdx].isSafe) {
@@ -345,6 +336,7 @@ io.on('connection', (socket) => {
 
     } else {
       advanceTurn(room);
+      room.isFirstTurnEver = false;
       checkSafety(room);
       io.to(room.code).emit('gameState', { room, event: 'play', playedBy: player.name });
 
@@ -366,18 +358,7 @@ io.on('connection', (socket) => {
 
   function checkSafety(room) {
     room.players.forEach(p => {
-      // Controlliamo se ha 0 carte e non è già salvo
       if (!p.isSafe && p.cards.length === 0) {
-        // REGOLA 1vs1: Se siamo in 1vs1 (rimasti in 2 inizialmente, ora ne resta 1) 
-        // e questo giocatore ha chiuso con una carta troppo pesante, gli diamo penalità.
-        const activeBefore = room.players.filter(x => !x.isSafe);
-        if (activeBefore.length === 2) {
-          // Troviamo l'avversario rimasto
-          const opponent = room.players.find(x => x.id !== p.id && !x.isSafe);
-          // Se l'avversario ha ancora carte e l'ultima mossa ha visto questo giocatore chiudere con un rank maggiore...
-          // Per sicurezza, se ha chiuso senza poterlo fare, gli assegniamo una carta di penalità:
-        }
-        
         p.isSafe = true;
         room.winnersList.push(p.name);
       }
