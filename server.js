@@ -221,8 +221,6 @@ io.on('connection', (socket) => {
     if (room.leadSuit && card.suit !== room.leadSuit) {
       const hasLeadSuit = player.cards.some(c => c.suit === room.leadSuit);
       if (hasLeadSuit) {
-        // Dal secondo turno in poi, se hai il seme e non rispondi, viene bloccato.
-        // Al primo turno in assoluto permettiamo di scartare se non si ha il seme guida.
         if (!room.isFirstTurnEver) {
           const suitNames = { 'S': 'Picche ♠', 'H': 'Cuori ♥', 'D': 'Quadri ♦', 'C': 'Fiori ♣' };
           if (socket) socket.emit('errorMsg', `Devi rispondere con il seme della presa (${suitNames[room.leadSuit]})!`);
@@ -237,14 +235,10 @@ io.on('connection', (socket) => {
       room.leadSuit = card.suit;
     }
 
-    // Regola Thulla: 
-    // - Se è il primissimo turno in assoluto e non hai il seme guida, NON è Thulla.
-    // - Dal secondo turno in poi, se non rispondi al seme guida, È THULLA!
     let isThulla = false;
     if (room.leadSuit && card.suit !== room.leadSuit) {
       if (room.isFirstTurnEver) {
         const hasLeadSuit = player.cards.some(c => c.suit === room.leadSuit);
-        // Se non aveva il seme in mano, nessun Thulla. Se ce l'aveva ed è uscito fuori seme, Thulla.
         isThulla = hasLeadSuit;
       } else {
         isThulla = true;
